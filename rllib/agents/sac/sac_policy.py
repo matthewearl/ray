@@ -17,6 +17,7 @@ from ray.rllib.utils.error import UnsupportedSpaceException
 from ray.rllib.utils import try_import_tf, try_import_tfp
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.tf_ops import minimize_and_clip, make_tf_callable
+from ray.rllib.evaluation.episode import _flatten_action
 
 tf = try_import_tf()
 tfp = try_import_tfp()
@@ -30,15 +31,6 @@ def build_sac_model(policy, obs_space, action_space, config):
             "Setting use_state_preprocessor=True since a custom model "
             "was specified.")
         config["use_state_preprocessor"] = True
-    if not isinstance(action_space, Box):
-        raise UnsupportedSpaceException(
-            "Action space {} is not supported for SAC.".format(action_space))
-    if len(action_space.shape) > 1:
-        raise UnsupportedSpaceException(
-            "Action space has multiple dimensions "
-            "{}. ".format(action_space.shape) +
-            "Consider reshaping this into a single dimension, "
-            "using a Tuple action space, or the multi-agent API.")
 
     if config["use_state_preprocessor"]:
         default_model = None  # catalog decides
@@ -89,9 +81,8 @@ def postprocess_trajectory(policy,
 
 
 def get_dist_class(config, action_space):
-    action_dist_class = SquashedGaussian if \
-        config["normalize_actions"] is True else DiagGaussian
-    return action_dist_class
+    dist_cls, num_action_dist_params = ModelCatalog.get_action_dist(action_space, config=None)
+    return dist_cls
 
 
 def get_log_likelihood(policy, model, actions, input_dict, obs_space,
@@ -141,11 +132,26 @@ def actor_critic_loss(policy, model, _, train_batch):
     action_dist_t = action_dist_class(
         model.action_model(model_out_t), policy.model)
     policy_t = action_dist_t.sample()
+
+    def ensure_2d(t):
+        assert len(t.shape) in (1, 2)
+        if len(t.shape) == 1:
+            return t[:, None]
+        else:
+            return t
+
+    policy_t = tf.concat([tf.cast(ensure_2d(x), dtype=tf.float32)
+                           for x in policy_t.batches],
+                         axis=1)
+
     log_pis_t = tf.expand_dims(action_dist_t.sampled_action_logp(), -1)
 
     action_dist_tp1 = action_dist_class(
         model.action_model(model_out_tp1), policy.model)
     policy_tp1 = action_dist_tp1.sample()
+    policy_tp1 = tf.concat([tf.cast(ensure_2d(x), dtype=tf.float32)
+                           for x in policy_tp1.batches],
+                         axis=1)
     log_pis_tp1 = tf.expand_dims(action_dist_tp1.sampled_action_logp(), -1)
 
     log_alpha = model.log_alpha

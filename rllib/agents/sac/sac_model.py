@@ -1,5 +1,6 @@
 import numpy as np
 
+from ray.rllib.models.catalog import ModelCatalog
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
 from ray.rllib.utils import try_import_tf, try_import_tfp
 
@@ -72,7 +73,10 @@ class SACModel(TFModelV2):
 
         super(SACModel, self).__init__(obs_space, action_space, num_outputs,
                                        model_config, name)
-        self.action_dim = np.product(action_space.shape)
+
+        dist_cls, num_action_dist_params = ModelCatalog.get_action_dist(action_space, config=None)
+        _, action_shape = ModelCatalog.get_action_shape(action_space)
+        self.action_dim = np.product(action_shape[1:])
         self.model_out = tf.keras.layers.Input(
             shape=(num_outputs, ), name="model_out")
         self.action_model = tf.keras.Sequential([
@@ -83,14 +87,14 @@ class SACModel(TFModelV2):
             for i, hidden in enumerate(actor_hiddens)
         ] + [
             tf.keras.layers.Dense(
-                units=2 * self.action_dim, activation=None, name="action_out")
+                units=num_action_dist_params, activation=None, name="action_out")
         ])
         self.shift_and_log_scale_diag = self.action_model(self.model_out)
 
         self.register_variables(self.action_model.variables)
 
         self.actions_input = tf.keras.layers.Input(
-            shape=(self.action_dim, ), name="actions")
+            shape=(self.action_dim,), name="actions")
 
         def build_q_net(name, observations, actions):
             q_net = tf.keras.Sequential([
@@ -107,8 +111,10 @@ class SACModel(TFModelV2):
             ])
 
             # TODO(hartikainen): Remove the unnecessary Model call here
-            q_net = tf.keras.Model([observations, actions],
-                                   q_net([observations, actions]))
+            actions_flat = tf.concat(actions, axis=1)
+            #q_net = tf.keras.Model([observations, actions],
+            #                       q_net([observations, actions_flat]))
+            qnet = q_net([observations, actions_flat])
             return q_net
 
         self.q_net = build_q_net("q", self.model_out, self.actions_input)
