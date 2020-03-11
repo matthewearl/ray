@@ -451,6 +451,10 @@ class MultiActionDistribution(TFActionDistribution):
         return functools.reduce(lambda a, b: a + b, entropy_list)
 
     @override(ActionDistribution)
+    def multi_entropy(self):
+        return tf.stack([s.entropy() for s in self.child_distributions], axis=1)
+
+    @override(ActionDistribution)
     def sample(self):
         return TupleActions([s.sample() for s in self.child_distributions])
 

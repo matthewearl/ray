@@ -84,6 +84,8 @@ class PPOLoss:
 
         curr_entropy = curr_action_dist.entropy()
         self.mean_entropy = reduce_mean_valid(curr_entropy)
+        multi_entropy = curr_action_dist.multi_entropy()
+        self.mean_multi_entropy = tf.reduce_mean(multi_entropy, axis=0)
 
         surrogate_loss = tf.minimum(
             advantages * logp_ratio,
@@ -143,7 +145,7 @@ def ppo_surrogate_loss(policy, model, dist_class, train_batch):
 
 
 def kl_and_loss_stats(policy, train_batch):
-    return {
+    out = {
         "cur_kl_coeff": tf.cast(policy.kl_coeff, tf.float64),
         "cur_lr": tf.cast(policy.cur_lr, tf.float64),
         "total_loss": policy.loss_obj.loss,
@@ -156,6 +158,12 @@ def kl_and_loss_stats(policy, train_batch):
         "entropy": policy.loss_obj.mean_entropy,
         "entropy_coeff": tf.cast(policy.entropy_coeff, tf.float64),
     }
+
+    multi_entropy = policy.loss_obj.mean_multi_entropy
+    out.update({f'multi_entropy_{i}': multi_entropy[i]
+                for i in range(multi_entropy.shape[0])})
+
+    return out
 
 
 def vf_preds_and_logits_fetches(policy):
